@@ -32,6 +32,7 @@ player_path = os.path.join(img_dir, "player.png")
 enemy_path = os.path.join(img_dir, "enemy.png")
 pencil_path = os.path.join(img_dir, "pencil.png")
 report_path = os.path.join(img_dir, "report.png")
+item_path = os.path.join(img_dir, "item.png")
 
 # --- 画像読み込み（例外が起きたら原因を表示） ---
 try:
@@ -40,6 +41,7 @@ try:
     enemy_img = load_image(enemy_path)
     pencil_img = load_image(pencil_path)
     report_img = load_image(report_path)
+    item_img = load_image(item_path)
 except FileNotFoundError as e:
     print(e)
     print("ex5/img/ フォルダに必要な画像を入れて、ファイル名が正しいか確認してください。")
@@ -55,6 +57,7 @@ player_img = pg.transform.scale(player_img, (80, 80))
 enemy_img  = pg.transform.scale(enemy_img,  (60, 60))
 pencil_img = pg.transform.scale(pencil_img, (24, 48))
 report_img = pg.transform.scale(report_img, (24, 36))
+item_img = pg.transform.scale(item_img, (24, 48))
 
 # --- クラス定義（Player.update は引数なし） ---
 class Player(pg.sprite.Sprite):
@@ -84,7 +87,7 @@ class Player(pg.sprite.Sprite):
 
 class Pencil(pg.sprite.Sprite):
     """プレイヤーが発射する「えんぴつ」弾を表すクラス。"""
-    def __init__(self, x, y):
+    def __init__(self, x, y, dx = 0):
         """
         弾を初期化。
 
@@ -96,11 +99,13 @@ class Pencil(pg.sprite.Sprite):
         self.image = pencil_img
         self.rect = self.image.get_rect(center=(x, y))
         self.speed = -12
+        self.dx = dx
 
     def update(self):
         """弾を上方向に移動し、画面外で消去する。"""
         self.rect.y += self.speed
-        if self.rect.bottom < 0:
+        self.rect.x += self.dx
+        if self.rect.bottom < 0  or self.rect.right < 0 or self.rect.left > WIDTH:
             self.kill()
 
 class Enemy(pg.sprite.Sprite):
@@ -148,11 +153,38 @@ class Report(pg.sprite.Sprite):
         if self.rect.top > HEIGHT:
             self.kill()
 
+class Item(pg.sprite.Sprite):
+    """プレイヤーが取得できるアイテムを表すクラス。一定速度で下に落下する。"""
+
+    def __init__(self, x: int, y: int) -> None:
+        """
+        アイテムを初期化する。
+
+        Args:
+            x (int): 初期X座標。
+            y (int): 初期Y座標。
+        """
+        super().__init__()
+        self.image: pg.Surface = item_img
+        self.rect: pg.Rect = self.image.get_rect(center=(x, y))
+        self.speed: int = random.randint(2, 4)
+
+    def update(self) -> None:
+        """アイテムを下方向に移動し、画面外に出たら再配置する。"""
+        self.rect.y += self.speed
+        if self.rect.top > HEIGHT:
+            # 上にリスポーン
+            self.rect.y = random.randint(-120, -40)
+            self.rect.x = random.randint(50, WIDTH - 50)
+            self.speed = random.randint(2, 4)
+
+
 # --- グループ定義 ---
 all_sprites = pg.sprite.Group()
 pencils = pg.sprite.Group()
 enemies = pg.sprite.Group()
 enemy_reports = pg.sprite.Group()
+items = pg.sprite.Group()
 
 player = Player()
 all_sprites.add(player)   # ← ここは必ず追加しておく（描画されるように）
@@ -162,8 +194,13 @@ for i in range(5):
     e = Enemy()
     enemies.add(e)
     all_sprites.add(e)
+for i in range(2):
+    item = Item(random.randint(50, WIDTH-50), random.randint(-150, -50))
+    items.add(item)
+    all_sprites.add(item)
 
 score = 0
+i_frug = 0 
 
 # --- メインループ ---
 running = True
@@ -172,11 +209,24 @@ while running:
     for event in pg.event.get():
         if event.type == pg.QUIT:
             running = False
-        if event.type == pg.KEYDOWN and event.key == pg.K_SPACE:
+
+        if event.type == pg.KEYDOWN and event.key == pg.K_SPACE and i_frug == 1:
+        # 真っすぐ発射
+            pencil = Pencil(player.rect.centerx, player.rect.top)
+            # 左斜め発射
+            pencil_left = Pencil(player.rect.centerx, player.rect.top, dx=-5)
+            # 右斜め発射
+            pencil_right = Pencil(player.rect.centerx, player.rect.top, dx=5)
+
+            all_sprites.add(pencil, pencil_left, pencil_right)
+            pencils.add(pencil, pencil_left, pencil_right)
+
+        elif event.type == pg.KEYDOWN and event.key == pg.K_SPACE:
             # スペースで鉛筆弾を作り、グループへ追加
             pencil = Pencil(player.rect.centerx, player.rect.top)
             all_sprites.add(pencil)
             pencils.add(pencil)
+        
 
     # まとめて更新（Player.update は内部でキー取得している）
     all_sprites.update()
@@ -192,6 +242,15 @@ while running:
     # 衝突判定：敵の弾とプレイヤー
     if pg.sprite.spritecollideany(player, enemy_reports):
         running = False  # ゲームオーバー
+
+    # プレイヤーとアイテムの衝突判定
+    item_hits = pg.sprite.spritecollide(player, items, True)
+    for _ in item_hits:
+        i_frug = 1  # 例：アイテムを取ると弾数が増える
+    # 新しいアイテムをリスポーン
+        i = Item(random.randint(50, WIDTH-50), random.randint(-150, -50))
+        items.add(i)
+        all_sprites.add(i)
 
     # 描画
     screen.blit(background, (0, 0))
