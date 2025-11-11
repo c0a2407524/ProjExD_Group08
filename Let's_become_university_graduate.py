@@ -24,28 +24,35 @@ def load_image(path, required=True):
 
 # --- 画像読み込み ---
 img_dir = os.path.join(os.path.dirname(__file__), "img")
-background = load_image(os.path.join(img_dir, "background.png"))
-player_img = load_image(os.path.join(img_dir, "player.png"))
-enemy_img = load_image(os.path.join(img_dir, "enemy.png"))
-pencil_img = load_image(os.path.join(img_dir, "pencil.png"))
-report_img = load_image(os.path.join(img_dir, "report.png"))
-lunch_img = load_image(os.path.join(img_dir, "lunch.png"), required=False)
-clear_img = load_image(os.path.join(img_dir, "clear.png"), required=False)
-gameover_img = load_image(os.path.join(img_dir, "gameover.png"), required=False)
+try:
+    background = load_image(os.path.join(img_dir, "background.png"))
+    player_img = load_image(os.path.join(img_dir, "player.png"))
+    enemy_img = load_image(os.path.join(img_dir, "enemy.png"))
+    pencil_img = load_image(os.path.join(img_dir, "pencil.png"))
+    report_img = load_image(os.path.join(img_dir, "report.png"))
+    item_img = load_image(os.path.join(img_dir, "item.png"))
+    lunch_img = load_image(os.path.join(img_dir, "lunch.png"), required=False)
+    clear_img = load_image(os.path.join(img_dir, "clear.png"), required=False)
+    gameover_img = load_image(os.path.join(img_dir, "gameover.png"), required=False)
+except FileNotFoundError as e:
+    print(e)
+    print("imgフォルダに必要な画像を入れてください。")
+    pg.quit()
+    sys.exit(1)
 
-# --- スケール調整 ---
+# --- 画像スケーリング ---
 background = pg.transform.scale(background, (WIDTH, HEIGHT))
 player_img = pg.transform.scale(player_img, (80, 80))
 enemy_img = pg.transform.scale(enemy_img, (60, 60))
 pencil_img = pg.transform.scale(pencil_img, (24, 48))
 report_img = pg.transform.scale(report_img, (24, 36))
+item_img = pg.transform.scale(item_img, (24, 48))
 if lunch_img:
     lunch_img = pg.transform.scale(lunch_img, (28, 28))
 else:
     lunch_img = pg.Surface((28, 28), pg.SRCALPHA)
     pg.draw.rect(lunch_img, (255, 215, 0), lunch_img.get_rect(), border_radius=6)
 
-# --- ゲームオーバー/クリア画像中央配置 ---
 def center_and_scale(img):
     if not img:
         return None, None
@@ -85,15 +92,17 @@ class Player(pg.sprite.Sprite):
             self.image.set_alpha(255)
 
 class Pencil(pg.sprite.Sprite):
-    def __init__(self, x, y):
+    def __init__(self, x, y, dx=0):
         super().__init__()
         self.image = pencil_img
         self.rect = self.image.get_rect(center=(x, y))
         self.speed = -12
+        self.dx = dx
 
     def update(self):
         self.rect.y += self.speed
-        if self.rect.bottom < 0:
+        self.rect.x += self.dx
+        if self.rect.bottom < 0 or self.rect.right < 0 or self.rect.left > WIDTH:
             self.kill()
 
 class Report(pg.sprite.Sprite):
@@ -163,28 +172,58 @@ class Boss(pg.sprite.Sprite):
             all_sprites.add(report)
             self.timer = 0
 
+class Item(pg.sprite.Sprite):
+    def __init__(self, x, y):
+        super().__init__()
+        self.image = item_img
+        self.rect = self.image.get_rect(center=(x, y))
+        self.speed = random.randint(2, 4)
+
+    def update(self):
+        self.rect.y += self.speed
+        if self.rect.top > HEIGHT:
+            self.rect.y = random.randint(-120, -40)
+            self.rect.x = random.randint(50, WIDTH - 50)
+
+# --- グループ定義 ---
+all_sprites = pg.sprite.Group()
+pencils = pg.sprite.Group()
+enemies = pg.sprite.Group()
+enemy_reports = pg.sprite.Group()
+lunches = pg.sprite.Group()
+items = pg.sprite.Group()
+
 # --- ゲーム初期化 ---
 def reset_game():
-    global all_sprites, pencils, enemies, enemy_reports, lunches, player, score, running, frame_count, bosses
-    all_sprites = pg.sprite.Group()
-    pencils = pg.sprite.Group()
-    enemies = pg.sprite.Group()
-    enemy_reports = pg.sprite.Group()
-    lunches = pg.sprite.Group()
+    global all_sprites, pencils, enemies, enemy_reports, lunches, player, score, running, frame_count, bosses, items, i_frug
+    all_sprites.empty()
+    pencils.empty()
+    enemies.empty()
+    enemy_reports.empty()
+    lunches.empty()
+    items.empty()
+
     player = Player()
     all_sprites.add(player)
+
     for _ in range(5):
         e = Enemy()
         enemies.add(e)
         all_sprites.add(e)
+
+    for _ in range(2):
+        item = Item(random.randint(50, WIDTH-50), random.randint(-150, -50))
+        items.add(item)
+        all_sprites.add(item)
+
     score = 0
+    i_frug = 0
     running = True
     frame_count = 0
     bosses = False
 
 # --- ゲーム変数 ---
 target_score = 30
-INVINCIBLE_DURATION = 10000
 pickup_msg = ""
 pickup_timer = 0
 lunch_spawn_timer = random.randint(300, 1000)
@@ -192,6 +231,7 @@ boss_spawn_time = 20 * 60
 
 # --- メインループ ---
 reset_game()
+
 while True:
     while running:
         clock.tick(60)
@@ -202,9 +242,18 @@ while True:
                 pg.quit()
                 sys.exit()
             if event.type == pg.KEYDOWN and event.key == pg.K_SPACE:
-                pencil = Pencil(player.rect.centerx, player.rect.top)
-                all_sprites.add(pencil)
-                pencils.add(pencil)
+                if event.type == pg.KEYDOWN and event.key == pg.K_SPACE:
+                    if i_frug == 1:
+            # 3方向ショット
+                        for dx in (-5, 0, 5):
+                            pencil = Pencil(player.rect.centerx, player.rect.top, dx)
+                            all_sprites.add(pencil)
+                            pencils.add(pencil)
+                else:
+        # 通常ショット
+                        pencil = Pencil(player.rect.centerx, player.rect.top)
+                        all_sprites.add(pencil)
+                        pencils.add(pencil)
 
         # ボス出現
         if not bosses and frame_count >= boss_spawn_time:
@@ -258,6 +307,14 @@ while True:
             pickup_msg = "🍛 HP回復！" if player.hp > before else "🍛 満腹！（上限）"
             pickup_timer = 60
 
+        # プレイヤーとアイテム
+        item_hits = pg.sprite.spritecollide(player, items, True)
+        for _ in item_hits:
+            i_frug = 1
+            new_item = Item(random.randint(50, WIDTH-50), random.randint(-150, -50))
+            items.add(new_item)
+            all_sprites.add(new_item)
+
         # クリア条件
         if score >= target_score:
             result = "clear"
@@ -292,12 +349,12 @@ while True:
     screen.blit(text3, (WIDTH // 2 - text3.get_width() // 2, HEIGHT // 2 + 50))
     pg.display.flip()
 
-    # --- リスタート待機 ---
     waiting = True
     while waiting:
         for event in pg.event.get():
             if event.type == pg.QUIT:
-                pg.quit(); sys.exit()
+                pg.quit()
+                sys.exit()
             if event.type == pg.KEYDOWN:
                 waiting = False
                 reset_game()
